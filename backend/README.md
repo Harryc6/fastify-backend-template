@@ -1,108 +1,23 @@
-# Dentstock Backend
+# Backend Starter (Fastify + TypeScript)
 
-Fastify + TypeScript backend that loads supplier catalogue CSVs, enriches products with cross-supplier matches, and exposes the result via a REST endpoint. The implementation prioritises clarity and explainability over complexity. More advanced architectural patterns (e.g. CQRS, event-driven ingestion, or modular frameworks such as NestJS) were considered but intentionally not introduced at this stage due to the scope of the problem.
+Reusable starting point for new backend services. The skeleton is generic; the
+`catalogue` domain (CSV loading + cross-supplier matching) is a worked example
+showing the intended structure — delete or replace it when you start a new project.
 
-## What this service does
+## What's included
 
-- Loads product rows from `../data/novadent_catalogue.csv` and `../data/primecare_catalogue.csv`
-- Normalises fields (for example `vat_rate` to numeric `vatRate`)
-- Computes product matches:
-  - `identical` when manufacturer code matches exactly
-  - `similar` using token-based name similarity plus brand/pack-size boosts
-  - transitive similar matching through identical cross-supplier pivot products
-- Serves the enriched catalogue through `GET /catalogue`
-- Exposes Swagger UI at `/documentation`
-
-## Tech stack
-
-- Node.js (ESM)
-- TypeScript
-- Fastify
-- Swagger (`@fastify/swagger`, `@fastify/swagger-ui`)
-- CSV parsing (`csv-parse`)
-- Vitest (unit and integration testing)
-
-## Architecture decisions
-
-- **Fastify + TypeScript**: Chosen for strong typing, performance, and schema-driven validation. This keeps the API contract explicit and self-documented via Swagger.
-- **Layered structure (routes → controllers → services)**: Separates HTTP concerns from business logic and data access, making the system easier to test and evolve.
-- **CSV loader abstraction**: Data ingestion is isolated from matching logic, allowing the data source to be replaced later (e.g. database or external API) without impacting the rest of the system.
-- **Single `/catalogue` endpoint**: Returns enriched data optimised for frontend consumption. In a production system, this would likely be split and paginated.
-- **Testable design**: Services and loaders are structured to allow unit testing with minimal mocking, enabling validation of parsing, matching, and API behaviour in isolation.
-
-## Matching strategy
-
-Matching is designed to be deterministic where possible and explainable where not.
-
-### Identical matches
-
-Products are treated as identical when their manufacturer codes match exactly after normalisation. This is considered the strongest available identifier in the supplied data and returns a confidence score of `1`.
-
-### Similar matches
-
-Where no identical match is found, the service calculates a similarity score using:
-
-- token-based name similarity using Jaccard similarity
-- brand match boost
-- pack-size match boost
-- a minimum confidence threshold to reduce noisy matches
-
-Each match includes a `confidence` score and a human-readable `reason`.
-
-### Transitive matching
-
-The service also supports transitive similar matching through identical cross-supplier pivot products.
-
-For example, if:
-
-- product A is identical to product B via manufacturer code
-- product B is similar to product C
-
-Then product C can be returned as a lower-confidence match for product A, with the confidence slightly discounted and the reason marked as coming via an identical pivot.
-
-## Trade-offs and limitations
-
-- Matching is heuristic-based and may produce false positives or miss valid matches
-- Token similarity does not account for semantic meaning (e.g. synonyms)
-- No persistence layer – data is loaded from CSV on startup
-- The `/catalogue` endpoint returns all data in one response, which would not scale for large datasets
-- Transitive matching can uncover useful indirect relationships, but it may also introduce weaker matches, so transitive confidence is discounted and the reason is made explicit.
-
-## Testing
-
-The project includes unit and integration tests using Vitest.
-
-### Coverage
-
-- **CSV ingestion**
-  - Parses rows correctly
-  - Normalises numeric fields (e.g. VAT and price)
-  - Ignores empty lines
-
-- **Matching logic**
-  - Identical matching via manufacturer code
-  - Similar matching using token similarity and boosts
-  - Transitive matching via identical pivot products
-  - Threshold filtering to prevent weak matches
-
-- **API layer**
-  - `GET /catalogue` returns enriched data
-  - Service layer is mocked to isolate route behaviour
-  - Swagger UI endpoint is accessible
-
-## Future improvements
-
-- Persist data in Postgres with normalised supplier/product models
-- Introduce background ingestion jobs for external supplier feeds
-- Replace heuristic matching with:
-  - fuzzy matching (Levenshtein)
-  - semantic matching (embeddings)
-- Add pagination and filtering to `/catalogue`
-- Add caching (e.g. Redis) for frequently accessed comparisons
+- **Fastify 5 + TypeScript (strict, ESM)** — layered structure: `routes → controllers → services`
+- **Path aliases** (`@config`, `@controllers`, `@services`, `@models`, `@routes`, `@utils`) wired consistently in `tsconfig.json` + `tsc-alias` + `vitest.config.ts`
+- **Swagger UI** at `/documentation`, schema-declared responses
+- **`/health`** liveness endpoint
+- **CORS** registered (open in dev, empty allowlist in production — tighten per project)
+- **Vitest** (unit + integration via `app.inject`, service mocked at the route layer)
+- **ESLint** (flat config, type-aware) + **Prettier**
+- **Dockerfile** (multi-stage) and **GitHub Actions CI** (lint + typecheck + test)
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm
 
 ## Setup
@@ -111,105 +26,51 @@ From `backend/`:
 
 ```bash
 npm install
-```
-
-Create/update `.env`:
-
-```dotenv
-PORT=3000
-NODE_ENV=development
+cp .env.example .env
 ```
 
 ## Run
 
 ```bash
-npm run dev
-```
-
-Build and run compiled output:
-
-```bash
-npm run build
-npm run start
+npm run dev      # watch mode (tsx)
+npm run build    # compile to dist/ and rewrite path aliases
+npm run start    # run compiled server
 ```
 
 ## Scripts
 
-- `npm run dev` - run in watch mode with `tsx`
-- `npm run build` - compile TypeScript to `dist/` and rewrite path aliases
-- `npm run start` - start compiled server from `dist/server.js`
-- `npm run lint` - run ESLint on `src/**/*.ts`
-- `npm run prettier` - format source files with Prettier
+| Script | Purpose |
+|---|---|
+| `npm run dev` | watch mode |
+| `npm run build` / `start` | compile / run compiled output |
+| `npm run lint` | ESLint over `src/**/*.ts` |
+| `npm run prettier` | format sources |
+| `npm run test` / `test:watch` / `test:coverage` | Vitest |
 
-### Testing
+## Configuration
 
-- `npm run test` - run all tests once using Vitest
-- `npm run test:watch` - run tests in watch mode
-- `npm run test:coverage` - run tests with coverage report
+All runtime config flows through `src/config/config.ts` — one place, typed,
+validated at boot. Add new settings there rather than reading `process.env`
+scattered around.
 
+| Var | Default | Notes |
+|---|---|---|
+| `PORT` | `3000` | validated integer |
+| `NODE_ENV` | `development` | affects CORS |
+| `APP_NAME` | `Backend API` | Swagger title |
+| `DATA_DIR` | `../data` | resolved relative to `backend/`, not shell cwd |
 
-## API
+## Starting a new project from this template
 
-### `GET /catalogue`
-
-Returns an array of catalogue items:
-
-- `supplier`
-- `supplierRef`
-- `name`
-- `brand`
-- `manufacturerCode`
-- `packSize`
-- `unitPriceGbp`
-- `vatRate`
-- `matches` (array of matched products)
-
-Each `matches` item includes:
-
-- `supplier`
-- `supplierRef`
-- `name`
-- `brand`
-- `manufacturerCode`
-- `packSize`
-- `unitPriceGbp`
-- `vatRate`
-- `matchType` (`identical` or `similar`)
-- `confidence`
-- `priceDifferenceGbp`
-- `reason`
-
-Example request:
-
-```bash
-curl http://localhost:3000/catalogue
-```
-
-Swagger docs:
-
-- `http://localhost:3000/documentation`
-
-## Project structure
-
-```text
-backend/
-  src/
-    app.ts
-    server.ts
-    config/
-    controllers/
-    models/
-    routes/
-    services/
-  eslint.config.mjs
-  tsconfig.json
-  package.json
-../data/
-  novadent_catalogue.csv
-  primecare_catalogue.csv
-```
+1. Use GitHub "Use this template" (or copy the repo).
+2. Rename in `backend/package.json` (`name`, `description`) and set `APP_NAME` in `.env`.
+3. Replace the demo domain: delete `src/{routes,controllers,services,models}/catalogue*`,
+   the catalogue schemas in `routes`, the `src/services/catalogue/` directory and its tests —
+   then add your own following the same layering.
+4. Point `DATA_DIR` at your own files (or drop the loader example and use a DB).
+5. In `app.ts`, tighten the CORS allowlist and Swagger info; drop `/catalogue` route registration.
 
 ## Notes
 
-- CSV data files are expected in `../data` relative to the `backend` folder.
-- The server binds to `0.0.0.0` and uses `PORT` from environment config.
+- `.env` is gitignored; keep `.env.example` current as the documented contract.
+- The server binds `0.0.0.0` and takes `PORT` from config.
